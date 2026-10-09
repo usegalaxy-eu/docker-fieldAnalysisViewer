@@ -1,0 +1,219 @@
+---
+title: "Final Field Analysis"
+author: "Mercedes Thieme"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny
+---
+
+
+```{r}
+ # Copy this command to the R terminal and run it to launch the dashboard.
+
+ # rmarkdown::run("C:/Users/Mercedes/Documents/R/Dashboard_FinalFieldAnalysis_v2.Rmd")
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(flexdashboard) # dashboard design
+library(plotly)        # interactive plots
+library(shiny)         # custamize sidebar (filter/radio buttons)
+library(data.table)
+library(tidyverse)
+library(ggiraph)
+library(kableExtra) # nice tables
+library(magrittr) # summarys
+library(DT)
+library(SpATS) # needs to be loaded in order to plot SpATS results
+```
+
+```{r, echo = FALSE}
+data_file <- "/inputs/input.csv"
+
+df <- if (file.exists(data_file)) {
+  fread(data_file)
+} else {
+  warning("Data file not found: ", data_file, call. = FALSE)
+  NULL
+}
+```
+
+```{r, echo = FALSE, eval = is.null(df)}
+tags$div(
+  class = "alert alert-warning",
+  tags$h4("Data file not found"),
+  tags$p("The dashboard could not start because the data file",
+         tags$code("MASTER_SpATS_results.csv"),
+         "is missing."),
+  tags$p("Mount the data file into the container and restart:"),
+  tags$pre("docker run -d -p 3838:3838 \\\n  -v /path/to/MASTER_SpATS_results.csv:/inputs/input.csv:ro \\\n  fieldanalysisviewer")
+)
+```
+
+```{r, echo = FALSE, eval = !is.null(df)}
+selectInput("trial", label = "Select Trial", choices = unique(df$field))
+selectInput("trait", label = "Select Trait", choices = unique(df$trait), selected = "rdw")
+```
+
+
+Row
+--------------------------------------------------------------------------------
+
+### Histogram of Whole Field
+
+```{r, echo = F}
+
+df_filtered <- reactive({
+  req(input$trial, input$trait)
+  df %>%
+    filter(field == input$trial,
+          trait == input$trait)
+})
+
+# Histogram
+
+renderPlot({
+
+  req(input$trial, input$trait)
+
+  mean_trait_spatially_corrected <- mean(df_filtered()$trait_spatially_corrected, na.rm = T)
+
+  #plot
+  ggplot(df_filtered(), aes(x = trait_spatially_corrected)) +
+    geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+    geom_vline(xintercept = mean_trait_spatially_corrected, color = "red", linetype = "dotted")+
+    theme_minimal() +
+    labs(
+      title = paste("Histogram of", input$trait),
+      x = input$trait,
+      y = "Count"
+    )
+})
+```
+
+### Field Summary Statistics
+```{r, echo = FALSE}
+
+field_stat <- reactive({
+  req(input$trial, input$trait)
+  df_filtered() %>%
+
+    summarise(
+      Count = sum(!is.na(trait_spatially_corrected)),
+      Missing = sum(is.na(trait_spatially_corrected)),
+      Mean = round(mean(trait_spatially_corrected, na.rm = T), digits = 2),
+      SD = round(sd(trait_spatially_corrected, na.rm = T), digits = 2),
+      Min = round(min(trait_spatially_corrected, na.rm = T), digits = 2),
+      Max = round(max(trait_spatially_corrected, na.rm = T), digits = 2)
+    )
+})
+
+renderDT({
+  field_stat()
+})
+```
+
+
+<!-- ### Count (Box) -->
+
+```{r}
+
+# renderValueBox({
+
+#   stats <- field_stat()
+
+#   valueBox(
+#     value = stats$Count,
+#     caption = "Count",
+#     icon = "ion-flag" # ion-grid, ion-ios-trash
+#   )
+# })
+```
+
+<!-- ### Mean (Box) -->
+
+```{r}
+
+# renderValueBox({
+
+#   stats <- field_stat()
+
+#   valueBox(
+#     value = stats$Mean,
+#     caption = "Mean",
+#     icon = "fas fa-chart-line"
+#   )
+# })
+```
+
+
+<!-- ### Missing (Box) -->
+
+```{r}
+
+# renderValueBox({
+
+#   stats <- field_stat()
+
+#   valueBox(
+#     value = stats$Missing,
+#     caption = "Missing",
+#     icon = "ion-ios-trash"
+#   )
+# })
+```
+
+
+
+Row
+--------------------------------------------------------------------------------
+
+### Descriptive Stats per Line
+```{r, echo = FALSE}
+
+const_stat <- reactive({
+  req(input$trial, input$trait)
+  df_filtered() %>%
+    filter(
+      field == input$trial,
+      trait == input$trait)  %>%
+    group_by(line) %>%
+      summarize(
+        Count = sum(!is.na(trait_spatially_corrected)),
+        mean = round(mean(trait_spatially_corrected, na.rm = TRUE), digits = 2),
+        min = round(min(trait_spatially_corrected, na.rm = TRUE), digits = 2),
+        max = round(max(trait_spatially_corrected, na.rm = TRUE), digits = 2),
+        number_outlier = sum(outlier == "y"))
+})
+
+renderDT({
+  const_stat()
+})
+
+```
+
+
+### Outliers per Line
+
+```{r, echo = FALSE}
+
+outlier_list <- reactive({
+  req(input$trial, input$trait)
+  df_filtered() %>%
+    filter(
+      field == input$trial,
+      trait == input$trait,
+      outlier == "y")  %>%
+    select(field, year, plot, vector, line, name, rep,row, col, outlier, value = trait_spatially_corrected)  %>%
+    mutate(value = round(value, digits = 2))  %>%
+    arrange(vector, line, name, rep)
+})
+
+renderDT({
+  outlier_list()
+})
+
+```
